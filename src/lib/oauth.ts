@@ -18,7 +18,10 @@ export const OAUTH_CONFIG = {
     profileUrl: 'https://graph.facebook.com/me?fields=id,name,picture',
     clientId:     process.env.FACEBOOK_APP_ID     || '',
     clientSecret: process.env.FACEBOOK_APP_SECRET || '',
-    scope:       'pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish',
+    // Izin dasar agar koneksi berhasil tanpa App Review.
+    // Untuk posting ke Page/Instagram, tambahkan kembali setelah lolos App Review:
+    // pages_manage_posts,pages_read_engagement,pages_show_list,instagram_basic,instagram_content_publish
+    scope:       'public_profile',
     callbackUrl: `${BASE}/api/oauth/callback/facebook`,
   },
   twitter: {
