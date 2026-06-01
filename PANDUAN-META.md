@@ -6,9 +6,9 @@ aktif. Ikuti urut dari atas.
 **Nilai yang akan Anda butuhkan (salin dulu):**
 
 - Redirect URI Facebook:
-  `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/facebook`
+  `https://jadwalkonten.com/api/oauth/callback/facebook`
 - Redirect URI Instagram:
-  `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/instagram`
+  `https://jadwalkonten.com/api/oauth/callback/instagram`
 - Env var yang nanti diisi di Railway: `FACEBOOK_APP_ID` dan `FACEBOOK_APP_SECRET`
 
 ---
@@ -61,13 +61,13 @@ Simpan dua nilai ini, nanti dipakai di Langkah 6.
 1. Di App Dashboard → cari **Add Product** (atau menu **Products** di sidebar).
 2. Pada kartu **Facebook Login**, klik **Set up**.
 3. Pilih platform **Web** kalau ditanya. Untuk **Site URL** isi:
-   `https://bubbly-tranquility-production-6845.up.railway.app`
+   `https://jadwalkonten.com`
 4. Di sidebar buka **Facebook Login → Settings**, lalu isi
    **Valid OAuth Redirect URIs** dengan **kedua** URI ini (satu per baris):
 
    ```
-   https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/facebook
-   https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/instagram
+   https://jadwalkonten.com/api/oauth/callback/facebook
+   https://jadwalkonten.com/api/oauth/callback/instagram
    ```
 5. Pastikan **Client OAuth Login** dan **Web OAuth Login** dalam keadaan **ON**.
 6. Klik **Save changes**.
@@ -94,7 +94,7 @@ Simpan dua nilai ini, nanti dipakai di Langkah 6.
 3. Pastikan juga ada (kalau belum):
 
    ```
-   NEXTAUTH_URL = https://bubbly-tranquility-production-6845.up.railway.app
+   NEXTAUTH_URL = https://jadwalkonten.com
    ```
 4. Railway akan **redeploy** otomatis. Tunggu sampai status **Deployed**.
 

@@ -16,7 +16,7 @@ ke platform, lalu akunnya tersambung).
 Semua *Redirect URI* dibangun dari `NEXTAUTH_URL`. Pastikan di Railway → **Variables**:
 
 ```
-NEXTAUTH_URL = https://bubbly-tranquility-production-6845.up.railway.app
+NEXTAUTH_URL = https://jadwalkonten.com
 ```
 
 (ganti kalau domain Anda berubah)
@@ -26,12 +26,12 @@ Pola: `https://<domain-anda>/api/oauth/callback/<platform>`. Untuk domain Anda s
 
 | Platform  | Redirect URI yang harus didaftarkan |
 |-----------|-------------------------------------|
-| Instagram | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/instagram` |
-| Facebook  | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/facebook` |
-| Twitter/X | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/twitter` |
-| TikTok    | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/tiktok` |
-| LinkedIn  | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/linkedin` |
-| YouTube   | `https://bubbly-tranquility-production-6845.up.railway.app/api/oauth/callback/youtube` |
+| Instagram | `https://jadwalkonten.com/api/oauth/callback/instagram` |
+| Facebook  | `https://jadwalkonten.com/api/oauth/callback/facebook` |
+| Twitter/X | `https://jadwalkonten.com/api/oauth/callback/twitter` |
+| TikTok    | `https://jadwalkonten.com/api/oauth/callback/tiktok` |
+| LinkedIn  | `https://jadwalkonten.com/api/oauth/callback/linkedin` |
+| YouTube   | `https://jadwalkonten.com/api/oauth/callback/youtube` |
 
 ### c) Cara isi Environment Variable di Railway
 Buka project di Railway → tab **Variables** → **New Variable** → isi nama & nilai →
