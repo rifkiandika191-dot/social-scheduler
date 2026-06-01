@@ -50,25 +50,36 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
     }
 
     const tokenData = await tokenRes.json()
-    const accessToken  = tokenData.access_token
+    let accessToken    = tokenData.access_token
     const refreshToken = tokenData.refresh_token
     const expiresIn    = tokenData.expires_in
-
-    // Ambil profil dari platform
-    const profileRes = await fetch(cfg.profileUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
 
     let accountName = 'Unknown'
     let accountId   = userId
     let accountImage: string | undefined
 
-    if (profileRes.ok) {
-      const profile = await profileRes.json()
-      const extracted = extractProfile(platform, profile)
-      accountName  = extracted.name
-      accountId    = extracted.id
-      accountImage = extracted.image
+    if (platform === 'instagram') {
+      // Instagram: ambil akun IG Bisnis dari Page yang tertaut, simpan Page token untuk posting.
+      const ig = await getInstagramAccount(accessToken)
+      if (!ig) {
+        return NextResponse.redirect(`${BASE}/settings?error=no_instagram_account`)
+      }
+      accountName  = `@${ig.username}`
+      accountId    = ig.id
+      accountImage = ig.profileImage
+      accessToken  = ig.pageToken // Page access token dipakai untuk publish ke IG
+    } else {
+      // Ambil profil dari platform
+      const profileRes = await fetch(cfg.profileUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (profileRes.ok) {
+        const profile = await profileRes.json()
+        const extracted = extractProfile(platform, profile)
+        accountName  = extracted.name
+        accountId    = extracted.id
+        accountImage = extracted.image
+      }
     }
 
     // Cek jika akun sudah terhubung
@@ -107,6 +118,26 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
   } catch (err) {
     console.error('OAuth callback error:', err)
     return NextResponse.redirect(`${BASE}/settings?error=callback_failed`)
+  }
+}
+
+// Ambil akun Instagram Bisnis dari Page yang tertaut ke akun Facebook user.
+async function getInstagramAccount(userAccessToken: string) {
+  const url = `https://graph.facebook.com/v18.0/me/accounts?fields=name,access_token,instagram_business_account{id,username,profile_picture_url}&access_token=${userAccessToken}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    console.error('Gagal ambil daftar Page:', await res.text())
+    return null
+  }
+  const data = await res.json()
+  const page = (data.data || []).find((p: any) => p.instagram_business_account)
+  if (!page) return null
+  const ig = page.instagram_business_account
+  return {
+    id:           ig.id,
+    username:     ig.username,
+    profileImage: ig.profile_picture_url as string | undefined,
+    pageToken:    page.access_token as string,
   }
 }
 
