@@ -3,12 +3,15 @@ const BASE = (process.env.NEXTAUTH_URL || 'http://localhost:3000').trim().replac
 export const OAUTH_CONFIG = {
   instagram: {
     name:       'Instagram',
-    authUrl:    'https://api.instagram.com/oauth/authorize',
-    tokenUrl:   'https://api.instagram.com/oauth/access_token',
-    profileUrl: 'https://graph.instagram.com/me?fields=id,username,profile_picture_url',
+    // Instagram disambung lewat Facebook Login (Graph API), via Page yang tertaut.
+    authUrl:    'https://www.facebook.com/v18.0/dialog/oauth',
+    tokenUrl:   'https://graph.facebook.com/v18.0/oauth/access_token',
+    profileUrl: '', // ditangani khusus di callback (lewat Page yang tertaut)
     clientId:     process.env.INSTAGRAM_CLIENT_ID     || process.env.FACEBOOK_APP_ID || '',
     clientSecret: process.env.INSTAGRAM_CLIENT_SECRET || process.env.FACEBOOK_APP_SECRET || '',
-    scope:       'instagram_basic,instagram_content_publish,instagram_manage_insights',
+    // Izin minimal untuk menyambung akun IG Bisnis. Untuk posting tambahkan:
+    // instagram_content_publish,pages_manage_posts (perlu App Review untuk publik).
+    scope:       'instagram_basic,pages_show_list',
     callbackUrl: `${BASE}/api/oauth/callback/instagram`,
   },
   facebook: {
