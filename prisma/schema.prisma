@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  password            String
+  image               String?
+  emailVerified       Boolean   @default(false)
+  verificationToken   String?   @unique
+  verificationExpiry  DateTime?
+  resetToken          String?   @unique
+  resetTokenExpiry    DateTime?
+  plan                String    @default("free")
+  planExpiry          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  ownedTeams     Team[]         @relation("TeamOwner")
+  teamMembers    TeamMember[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+  notifications  Notification[]
+  subscription   Subscription?
+}
+
+model Subscription {
+  id                 String    @id @default(cuid())
+  plan               String
+  status             String    @default("active")
+  stripeCustomerId   String?
+  stripeSubId        String?
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerId        String
+  owner          User            @relation("TeamOwner", fields: [ownerId], references: [id])
+  members        TeamMember[]
+  posts          Post[]
+  socialAccounts SocialAccount[]
+  invites        TeamInvite[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+}
+
+model TeamInvite {
+  id        String   @id @default(cuid())
+  email     String
+  role      String   @default("member")
+  token     String   @unique @default(cuid())
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+}
+
+model SocialAccount {
+  id           String    @id @default(cuid())
+  platform     String
+  accountId    String
+  accountName  String
+  accountImage String?
+  accessToken  String
+  refreshToken String?
+  tokenExpiry  DateTime?
+  scope        String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  postPlatforms PostPlatform[]
+  analytics     Analytics[]
+}
+
+model Media {
+  id        String   @id @default(cuid())
+  type      String
+  url       String
+  thumbnail String?
+  filename  String
+  size      Int
+  width     Int?
+  height    Int?
+  duration  Float?
+  filters   String?
+  overlays  String?
+  createdAt DateTime @default(now())
+
+  postMedia PostMedia[]
+}
+
+model Post {
+  id          String    @id @default(cuid())
+  caption     String?
+  hashtags    String?
+  status      String    @default("draft")
+  scheduledAt DateTime?
+  publishedAt DateTime?
+  isStory     Boolean   @default(false)
+  storyConfig String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId String?
+  team   Team?  @relation(fields: [teamId], references: [id])
+
+  media     PostMedia[]
+  platforms PostPlatform[]
+}
+
+model PostMedia {
+  id    String @id @default(cuid())
+  order Int    @default(0)
+
+  postId  String
+  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, mediaId])
+}
+
+model PostPlatform {
+  id             String    @id @default(cuid())
+  status         String    @default("pending")
+  publishedAt    DateTime?
+  platformPostId String?
+  error          String?
+  retryCount     Int       @default(0)
+
+  postId          String
+  post            Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccountId String
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, socialAccountId])
+}
+
+model Analytics {
+  id          String   @id @default(cuid())
+  date        DateTime
+  likes       Int      @default(0)
+  comments    Int      @default(0)
+  shares      Int      @default(0)
+  views       Int      @default(0)
+  reach       Int      @default(0)
+  impressions Int      @default(0)
+  saves       Int      @default(0)
+  clicks      Int      @default(0)
+
+  socialAccountId String
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  postPlatformId  String?
+
+  @@index([socialAccountId, date])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  data      String?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
