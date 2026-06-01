@@ -1,4 +1,4 @@
-const BASE = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+const BASE = (process.env.NEXTAUTH_URL || 'http://localhost:3000').trim().replace(/\/+$/, '')
 
 export const OAUTH_CONFIG = {
   instagram: {

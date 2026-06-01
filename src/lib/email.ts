@@ -10,7 +10,7 @@ function getResend() {
 }
 
 const APP_NAME = 'Social Scheduler'
-const BASE_URL = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+const BASE_URL = (process.env.NEXTAUTH_URL || 'http://localhost:3000').trim().replace(/\/+$/, '')
 const FROM_EMAIL = process.env.RESEND_FROM || 'Social Scheduler <onboarding@resend.dev>'
 
 export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {

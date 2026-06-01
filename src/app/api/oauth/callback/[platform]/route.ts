@@ -3,7 +3,7 @@ import { OAUTH_CONFIG, type OAuthPlatform } from '@/lib/oauth'
 import { prisma } from '@/lib/db'
 import { addDays } from 'date-fns'
 
-const BASE = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+const BASE = (process.env.NEXTAUTH_URL || 'http://localhost:3000').trim().replace(/\/+$/, '')
 
 export async function GET(req: NextRequest, { params }: { params: { platform: string } }) {
   const platform = params.platform as OAuthPlatform
