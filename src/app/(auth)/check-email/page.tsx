@@ -1,11 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Mail, Loader2, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 
 export default function CheckEmailPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-pink-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-brand-600 border-t-transparent rounded-full animate-spin" /></div>}>
+      <CheckEmailContent />
+    </Suspense>
+  )
+}
+
+function CheckEmailContent() {
   const params  = useSearchParams()
   const email   = params.get('email') || ''
   const [sent, setSent]       = useState(false)
@@ -46,22 +54,17 @@ export default function CheckEmailPage() {
             <p>3. Klik tombol "Verifikasi Email"</p>
             <p className="text-gray-400 text-xs">Link berlaku 24 jam. Cek folder spam jika tidak ada di inbox.</p>
           </div>
-
           {sent ? (
             <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
               ✓ Email verifikasi baru sudah dikirim!
             </div>
           ) : (
-            <button
-              onClick={resend}
-              disabled={loading}
-              className="btn-secondary text-sm flex items-center gap-2 mx-auto"
-            >
+            <button onClick={resend} disabled={loading}
+              className="btn-secondary text-sm flex items-center gap-2 mx-auto">
               {loading ? <Loader2 size={14} className="animate-spin" /> : null}
               Kirim Ulang Email
             </button>
           )}
-
           <Link href="/login" className="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1 justify-center">
             <ArrowLeft size={13} /> Kembali ke Login
           </Link>
