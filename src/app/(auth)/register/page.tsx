@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { signIn } from 'next-auth/react'
 import Link from 'next/link'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
@@ -9,6 +10,7 @@ export default function RegisterPage() {
   const router = useRouter()
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' })
   const [showPass, setShowPass] = useState(false)
+  const [notRobot, setNotRobot] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,22 +25,37 @@ export default function RegisterPage() {
       setError('Password minimal 6 karakter.')
       return
     }
+    if (!notRobot) {
+      setError('Centang "Saya bukan robot" dulu ya.')
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
+        body: JSON.stringify({ name: form.name, email: form.email, password: form.password, notRobot }),
       })
       const data = await res.json()
       if (!res.ok) {
         setError(data.error || 'Terjadi kesalahan.')
-      } else {
-        router.push(`/check-email?email=${encodeURIComponent(form.email)}`)
+        setLoading(false)
+        return
       }
+      // Langsung masuk pakai akun yang baru didaftarkan
+      const login = await signIn('credentials', {
+        email: form.email,
+        password: form.password,
+        redirect: false,
+      })
+      if (login?.error) {
+        // Akun sudah dibuat, tapi auto-login gagal — arahkan ke halaman login
+        router.push('/login?registered=1')
+        return
+      }
+      router.push('/dashboard')
     } catch {
       setError('Terjadi kesalahan jaringan.')
-    } finally {
       setLoading(false)
     }
   }
@@ -113,10 +130,19 @@ export default function RegisterPage() {
                 required
               />
             </div>
+            <label className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3 cursor-pointer select-none hover:bg-gray-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={notRobot}
+                onChange={e => setNotRobot(e.target.checked)}
+                className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+              />
+              <span className="text-sm text-gray-700">Saya bukan robot</span>
+            </label>
             <button
               type="submit"
-              disabled={loading}
-              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2"
+              disabled={loading || !notRobot}
+              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
               {loading ? 'Membuat akun...' : 'Daftar Sekarang'}

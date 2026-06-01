@@ -4,7 +4,7 @@ import { useState, Suspense } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, EyeOff, Loader2, CheckCircle2, Mail } from 'lucide-react'
+import { Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
 
 export default function LoginPage() {
   return (
@@ -21,16 +21,12 @@ function LoginForm() {
   const [showPass, setShowPass] = useState(false)
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
-  const [unverifiedEmail, setUnverifiedEmail] = useState('')
-  const [resendSent, setResendSent]           = useState(false)
 
-  const verified   = searchParams.get('verified') === '1'
   const registered = searchParams.get('registered') === '1'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    setUnverifiedEmail('')
     setLoading(true)
 
     const res = await signIn('credentials', {
@@ -41,24 +37,11 @@ function LoginForm() {
 
     setLoading(false)
 
-    if (res?.error === 'EMAIL_NOT_VERIFIED') {
-      setUnverifiedEmail(form.email)
-      return
-    }
     if (res?.error) {
       setError('Email atau password salah.')
       return
     }
     router.push('/dashboard')
-  }
-
-  async function resendVerification() {
-    await fetch('/api/auth/resend-verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: unverifiedEmail }),
-    })
-    setResendSent(true)
   }
 
   return (
@@ -73,45 +56,14 @@ function LoginForm() {
         </div>
 
         <div className="card p-8">
-          {/* Banner sukses */}
-          {verified && (
+          {/* Banner sukses daftar */}
+          {registered && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-center gap-3">
               <CheckCircle2 size={20} className="text-green-500 flex-shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-green-800">Email berhasil diverifikasi!</p>
-                <p className="text-xs text-green-600">Akun Anda sudah aktif. Silakan masuk.</p>
+                <p className="text-sm font-semibold text-green-800">Akun berhasil dibuat!</p>
+                <p className="text-xs text-green-600">Silakan masuk dengan akun yang baru Anda daftarkan.</p>
               </div>
-            </div>
-          )}
-          {registered && !verified && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 flex items-center gap-3">
-              <Mail size={20} className="text-blue-500 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-blue-800">Akun berhasil dibuat!</p>
-                <p className="text-xs text-blue-600">Cek email Anda untuk verifikasi sebelum masuk.</p>
-              </div>
-            </div>
-          )}
-
-          {/* Banner email belum verifikasi */}
-          {unverifiedEmail && (
-            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4">
-              <p className="text-sm font-semibold text-orange-800 flex items-center gap-2">
-                <Mail size={15} /> Email belum diverifikasi
-              </p>
-              <p className="text-xs text-orange-600 mt-1">
-                Silakan cek email <strong>{unverifiedEmail}</strong> dan klik link verifikasi.
-              </p>
-              {resendSent ? (
-                <p className="text-xs text-green-600 mt-2 font-medium">✓ Email verifikasi baru dikirim!</p>
-              ) : (
-                <button
-                  onClick={resendVerification}
-                  className="text-xs text-orange-700 underline mt-2 hover:text-orange-900"
-                >
-                  Kirim ulang email verifikasi
-                </button>
-              )}
             </div>
           )}
 

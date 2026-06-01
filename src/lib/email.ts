@@ -58,28 +58,6 @@ function baseTemplate(content: string) {
 </div></body></html>`
 }
 
-export function verificationEmail(params: { name: string; token: string }) {
-  const url = `${BASE_URL}/verify/${params.token}`
-  return baseTemplate(`
-    <div class="hdr">
-      <h1>Verifikasi Email Anda ✉️</h1>
-      <p>Satu langkah lagi untuk mulai!</p>
-    </div>
-    <div class="body">
-      <p>Halo <strong>${params.name}</strong>,</p>
-      <p>Terima kasih sudah mendaftar di <strong>${APP_NAME}</strong>. Klik tombol di bawah untuk mengaktifkan akun Anda:</p>
-      <div style="text-align:center;margin:28px 0">
-        <a href="${url}" class="btn">✅ Verifikasi Email Sekarang</a>
-      </div>
-      <div class="info">
-        <p style="margin:0 0 8px;font-weight:600;color:#374151">⏰ Link berlaku 24 jam</p>
-        <p style="margin:0">Jika tombol tidak bisa diklik, copy link ini ke browser:<br/>
-        <a href="${url}">${url}</a></p>
-      </div>
-      <p style="color:#9ca3af;font-size:13px">Jika Anda tidak mendaftar di ${APP_NAME}, abaikan email ini.</p>
-    </div>`)
-}
-
 export function welcomeEmail(params: { name: string }) {
   return baseTemplate(`
     <div class="hdr">
