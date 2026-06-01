@@ -33,6 +33,12 @@ public/uploads/*
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 
+# Temp files (editor)
+*.tmp
+*.tmp.*
+*.swp
+*~
+
 # IDE
 .vscode/
 .idea/
