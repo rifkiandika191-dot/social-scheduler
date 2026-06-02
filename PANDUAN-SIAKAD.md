@@ -1,96 +1,75 @@
-# Panduan Monitor SIAKAD (Notifikasi Open/Close Perkuliahan)
+# Panduan Monitor SIAKAD (Notifikasi Open/Tutup Perkuliahan)
 
-Fitur ini memantau status **buka/tutup perkuliahan** di SIAKAD dan mengirim
-notifikasi ke **Telegram**:
+Memantau kolom **Status (Open/Tutup)** tiap mata kuliah di halaman **Perkuliahan**
+SIAKAD Kalla Institute (`siakad.kallabs.ac.id`) dan kirim notifikasi **Telegram**:
 
-1. **Saat status berubah** (buka ➜ tutup atau sebaliknya) → kirim notifikasi langsung.
-2. **5 menit setelah perubahan** → kirim **pengingat 1×** (tidak diulang).
+1. **Saat status sebuah mata kuliah berubah** (Open ➜ Tutup atau sebaliknya) → notif langsung.
+2. **5 menit setelah perubahan** → **pengingat 1×** untuk mata kuliah tersebut (tidak diulang).
 
-## 1. Siapkan Bot Telegram
+## ⚠️ Kenapa pakai cookie (bukan username/password)
 
-1. Chat ke **@BotFather** di Telegram → `/newbot` → ikuti instruksi → dapat **bot token**.
-2. Dapatkan **chat id** Anda:
-   - Chat dulu ke bot Anda (kirim pesan apa saja).
-   - Buka `https://api.telegram.org/bot<TOKEN>/getUpdates` di browser.
-   - Cari `"chat":{"id":...}` → itu chat id Anda.
+Login EWAKo (SSO) memakai **captcha "Kode Keamanan"**, jadi login otomatis tiap
+menit tidak bisa dilakukan. Solusinya: **pakai cookie sesi** — Anda login manual
+sekali di browser, salin cookie-nya, dan monitor memakai cookie itu sampai
+kedaluwarsa. Jika cookie habis, monitor mengirim notif agar Anda login ulang.
 
-Isi di `.env`:
+## 1. Bot Telegram
+
+1. Chat **@BotFather** → `/newbot` → dapatkan **bot token**.
+2. Kirim 1 pesan ke bot Anda, lalu buka `https://api.telegram.org/bot<TOKEN>/getUpdates`,
+   cari `"chat":{"id":...}` → itu **chat id** Anda.
 
 ```env
 TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
 TELEGRAM_CHAT_ID="123456789"
 ```
 
-> Jika dikosongkan, notifikasi hanya di-log ke console (mode mock) untuk uji coba.
+> Dikosongkan = mode mock (hanya di-log), berguna untuk uji coba.
 
-## 2. Konfigurasi akses SIAKAD
+## 2. Ambil URL + cookie SIAKAD
 
-Isi di `.env` (lihat `.env.example` untuk daftar lengkap):
+1. Login di `ewako.kallabs.ac.id` → masuk **Sistem Informasi Akademik [MHS]** → klik menu **Perkuliahan**.
+2. Salin **URL** halaman Perkuliahan dari address bar.
+3. Buka **DevTools** (klik kanan → Inspect) → tab **Network** → refresh halaman →
+   klik request halaman Perkuliahan → bagian **Request Headers** → salin **seluruh** nilai header `Cookie`.
 
 ```env
-SIAKAD_LOGIN_URL="https://siakad.kampus.ac.id/login"
-SIAKAD_PERKULIAHAN_URL="https://siakad.kampus.ac.id/perkuliahan"
-SIAKAD_USERNAME="nim_atau_username"
-SIAKAD_PASSWORD="password_anda"
-
-# Nama field form login (lihat HTML halaman login: klik kanan → Inspect)
-SIAKAD_USER_FIELD="username"
-SIAKAD_PASS_FIELD="password"
-
-# Kalau form login pakai token CSRF (mis. Laravel), isi nama field-nya:
-SIAKAD_CSRF_FIELD=""   # contoh: _token
-
-# Kata kunci penentu status (tidak case-sensitive)
-SIAKAD_OPEN_KEYWORDS="buka,dibuka,open,aktif"
-SIAKAD_CLOSE_KEYWORDS="tutup,ditutup,closed,nonaktif,tidak aktif"
+SIAKAD_PERKULIAHAN_URL="https://siakad.kallabs.ac.id/perkuliahan"   # sesuaikan dgn URL asli
+SIAKAD_COOKIE="nama1=nilai1; nama2=nilai2; ..."                      # tempel cookie utuh
 ```
 
-### Menyetel deteksi status
-
-Sistem mengambil halaman perkuliahan lalu mencari kata kunci di atas:
-- Hanya kata "open" yang muncul → status **buka**.
-- Hanya kata "close" yang muncul → status **tutup**.
-- Keduanya / tidak ada yang cocok → **tidak diketahui** (tidak ada notifikasi, supaya tak ada alarm palsu).
-
-Kalau halaman perkuliahan banyak teks lain yang ikut mengandung kata-kata itu,
-persempit pencarian ke bagian tertentu dengan **regex**:
+Kata kunci status sudah cocok dengan tampilan SIAKAD (Open/Tutup), tapi bisa disesuaikan:
 
 ```env
-# Contoh: hanya lihat blok yang memuat label "Status Perkuliahan ... </div>"
-SIAKAD_SECTION_REGEX="Status Perkuliahan.*?</div>"
+SIAKAD_OPEN_KEYWORDS="open,buka,dibuka,aktif"
+SIAKAD_CLOSE_KEYWORDS="tutup,ditutup,closed,nonaktif"
+SIAKAD_REMINDER_MINUTES="5"
+SIAKAD_TIMEZONE="Asia/Jakarta"
 ```
 
 ## 3. Jalankan pengecekan berkala (cron)
 
-Endpoint: `GET /api/siakad/check`
-Header wajib: `Authorization: Bearer <NEXTAUTH_SECRET>`
-(atau set `SIAKAD_CRON_SECRET` khusus).
+Endpoint: `GET /api/siakad/check` — header `Authorization: Bearer <NEXTAUTH_SECRET>`.
 
-Uji manual (lokal):
+Uji manual:
 
 ```bash
 curl -H "Authorization: Bearer social-scheduler-secret-key-2024" \
   http://localhost:3000/api/siakad/check
+# -> {"ok":true,"totalCourses":8,"changed":0,"reminders":0,...}
 ```
 
-Responsnya JSON, mis. `{"ok":true,"status":"open","changed":false,...}`.
-
-### Otomatis tiap 1 menit
-
-Pakai layanan cron eksternal (gratis), mis. **cron-job.org** atau **UptimeRobot**:
+Otomatis tiap 1 menit: pakai **cron-job.org** / **UptimeRobot**:
 - URL: `https://<domain-anda>/api/siakad/check`
-- Method: GET
 - Header: `Authorization: Bearer <NEXTAUTH_SECRET>`
 - Interval: 1 menit
 
-## Catatan teknis
+## Cara kerja & catatan
 
-- State (status terakhir, waktu perubahan, flag reminder) disimpan di file
-  `siakad-state.json` (sudah di-`.gitignore`). Tidak perlu migrasi database.
-- Pengecekan **pertama** hanya menetapkan baseline (tidak mengirim notifikasi).
-- Di Railway, filesystem bersifat ephemeral: setelah redeploy, baseline diset
-  ulang (paling banyak 1 notifikasi terlewat/duplikat setelah deploy).
-- File terkait:
-  - `src/lib/siakad.ts` — login, scraping, deteksi, logika notifikasi
-  - `src/lib/telegram.ts` — kirim pesan Telegram
-  - `src/app/api/siakad/check/route.ts` — endpoint cron
+- Parser membaca tabel, mengambil **Kode matkul** (mis. `KW022309`) + statusnya.
+- State (status terakhir per matkul, waktu berubah, flag reminder) disimpan di
+  `siakad-state.json` (di-`.gitignore`, tanpa migrasi DB).
+- Pengecekan **pertama** = baseline (tanpa notif). Matkul baru yang muncul belakangan
+  juga dianggap baseline.
+- Cookie kedaluwarsa → notif "Sesi SIAKAD habis" dikirim **1×** sampai cookie diperbarui.
+- File: `src/lib/siakad.ts`, `src/lib/telegram.ts`, `src/app/api/siakad/check/route.ts`.
