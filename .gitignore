@@ -17,6 +17,9 @@ build/
 *.db-journal
 prisma/dev.db
 
+# SIAKAD monitor state (transient, ditulis setiap pengecekan)
+siakad-state.json
+
 # OS
 .DS_Store
 Thumbs.db
