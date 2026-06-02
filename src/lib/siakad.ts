@@ -1,29 +1,38 @@
-// Monitor status open/close perkuliahan di SIAKAD.
+// Monitor status open/close (Open/Tutup) tiap mata kuliah pada halaman
+// "Perkuliahan" SIAKAD Kalla Institute (siakad.kallabs.ac.id).
+//
+// CATATAN PENTING soal LOGIN:
+//   Login EWAKo (SSO) memakai captcha "Kode Keamanan" sehingga login otomatis
+//   tidak dapat dilakukan. Karena itu monitor memakai COOKIE SESI:
+//   Anda login manual di browser, salin cookie, lalu simpan di SIAKAD_COOKIE.
+//   Saat cookie kedaluwarsa, monitor mengirim notifikasi agar Anda login ulang
+//   dan memperbarui cookie.
 //
 // Cara kerja:
-//   1. Login ke SIAKAD (POST kredensial, simpan cookie sesi).
-//   2. Ambil halaman perkuliahan, deteksi status: 'open' | 'closed' | 'unknown'.
-//   3. Bandingkan dengan status tersimpan sebelumnya (file JSON).
-//   4. Jika BERUBAH (open <-> closed): kirim notifikasi Telegram langsung,
-//      catat waktu perubahan, reset flag reminder.
-//   5. Jika sudah lewat SIAKAD_REMINDER_MINUTES (default 5) menit dari perubahan
-//      dan reminder belum dikirim: kirim pengingat 1x, lalu set flag.
-//
-// Semua bagian yang spesifik ke situs SIAKAD Anda dikonfigurasi via env
-// (lihat .env.example) sehingga tidak perlu mengubah kode.
+//   1. GET halaman Perkuliahan memakai SIAKAD_COOKIE.
+//   2. Parse tabel -> map { kodeMatkul: 'open' | 'closed' } (+ nama matkul).
+//   3. Bandingkan dgn status tersimpan (file JSON) PER mata kuliah.
+//   4. Jika ada yang BERUBAH (Open <-> Tutup) -> notif Telegram langsung.
+//   5. 5 menit setelah perubahan suatu matkul -> kirim pengingat 1x utk matkul itu.
 
 import { promises as fs } from 'fs'
 import path from 'path'
 import { sendTelegram } from './telegram'
 
-export type SiakadStatus = 'open' | 'closed' | 'unknown'
+export type SiakadStatus = 'open' | 'closed'
+
+interface CourseState {
+  status: SiakadStatus
+  name: string
+  changedAt: string   // ISO; kapan status matkul ini terakhir berubah
+  reminderSent: boolean
+}
 
 interface SiakadState {
-  status: SiakadStatus
-  changedAt: string | null   // ISO; kapan status terakhir berubah
-  reminderSent: boolean      // apakah pengingat 5 menit sudah dikirim utk perubahan terakhir
+  courses: Record<string, CourseState>   // key = kode matkul
   lastCheckedAt: string | null
   lastError?: string | null
+  sessionExpiredNotified?: boolean        // agar notif "login ulang" tidak spam
 }
 
 const STATE_FILE = process.env.SIAKAD_STATE_FILE || path.join(process.cwd(), 'siakad-state.json')
@@ -41,12 +50,14 @@ function reminderMinutes(): number {
 // State persistence (file JSON)
 // ---------------------------------------------------------------------------
 
-async function readState(): Promise<SiakadState | null> {
+async function readState(): Promise<SiakadState> {
   try {
     const raw = await fs.readFile(STATE_FILE, 'utf8')
-    return JSON.parse(raw) as SiakadState
+    const s = JSON.parse(raw) as SiakadState
+    if (!s.courses) s.courses = {}
+    return s
   } catch {
-    return null
+    return { courses: {}, lastCheckedAt: null }
   }
 }
 
@@ -55,138 +66,73 @@ async function writeState(state: SiakadState): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP dengan cookie jar sederhana (login butuh sesi melewati redirect)
+// Ambil halaman Perkuliahan (pakai cookie sesi)
 // ---------------------------------------------------------------------------
 
-function parseSetCookie(headers: Headers, jar: Map<string, string>) {
-  // Node fetch menggabungkan beberapa Set-Cookie; ambil per entri.
-  const raw = (headers as any).getSetCookie?.() as string[] | undefined
-  const cookies = raw && raw.length ? raw : (headers.get('set-cookie') ? [headers.get('set-cookie') as string] : [])
-  for (const c of cookies) {
-    const [pair] = c.split(';')
-    const idx = pair.indexOf('=')
-    if (idx > 0) jar.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim())
-  }
-}
-
-function cookieHeader(jar: Map<string, string>): string {
-  return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ')
-}
-
-async function fetchWithCookies(
-  url: string,
-  jar: Map<string, string>,
-  init: RequestInit = {},
-  maxRedirects = 5,
-): Promise<{ res: Response; body: string; finalUrl: string }> {
-  let currentUrl = url
-  let method = (init.method || 'GET').toUpperCase()
-  let body = init.body
-
-  for (let i = 0; i <= maxRedirects; i++) {
-    const headers = new Headers(init.headers as HeadersInit)
-    headers.set('User-Agent', env('SIAKAD_USER_AGENT', 'Mozilla/5.0 (compatible; SiakadMonitor/1.0)'))
-    if (jar.size) headers.set('Cookie', cookieHeader(jar))
-
-    const res: Response = await fetch(currentUrl, { ...init, method, body, headers, redirect: 'manual' })
-    parseSetCookie(res.headers, jar)
-
-    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
-      currentUrl = new URL(res.headers.get('location') as string, currentUrl).toString()
-      // Redirect setelah POST jadi GET (303/302 umum pada login).
-      if (method === 'POST') { method = 'GET'; body = undefined }
-      continue
-    }
-
-    const text = await res.text()
-    return { res, body: text, finalUrl: currentUrl }
-  }
-  throw new Error('Terlalu banyak redirect saat mengakses SIAKAD')
-}
-
-// ---------------------------------------------------------------------------
-// Login + ambil halaman perkuliahan
-// ---------------------------------------------------------------------------
+class SessionExpiredError extends Error {}
 
 async function fetchPerkuliahanHtml(): Promise<string> {
-  const loginUrl = env('SIAKAD_LOGIN_URL')
-  const perkuliahanUrl = env('SIAKAD_PERKULIAHAN_URL')
-  const username = env('SIAKAD_USERNAME')
-  const password = env('SIAKAD_PASSWORD')
+  const url = env('SIAKAD_PERKULIAHAN_URL')
+  const cookie = env('SIAKAD_COOKIE')
 
-  if (!loginUrl || !perkuliahanUrl || !username || !password) {
-    throw new Error('Konfigurasi SIAKAD belum lengkap (SIAKAD_LOGIN_URL, SIAKAD_PERKULIAHAN_URL, SIAKAD_USERNAME, SIAKAD_PASSWORD)')
-  }
+  if (!url) throw new Error('SIAKAD_PERKULIAHAN_URL belum diisi')
+  if (!cookie) throw new SessionExpiredError('SIAKAD_COOKIE belum diisi (login manual lalu salin cookie)')
 
-  const jar = new Map<string, string>()
-
-  // 1) GET halaman login untuk dapat cookie awal + (opsional) token CSRF.
-  const loginPage = await fetchWithCookies(loginUrl, jar)
-
-  // 2) Susun form login.
-  const form = new URLSearchParams()
-  form.set(env('SIAKAD_USER_FIELD', 'username'), username)
-  form.set(env('SIAKAD_PASS_FIELD', 'password'), password)
-
-  // Token CSRF opsional: cari pakai regex yang bisa dikonfigurasi.
-  // Default menangkap <input name="_token" value="..."> ala Laravel/CodeIgniter.
-  const csrfField = env('SIAKAD_CSRF_FIELD')
-  if (csrfField) {
-    const csrfRegex = env('SIAKAD_CSRF_REGEX') ||
-      `name=["']${csrfField}["'][^>]*value=["']([^"']+)["']`
-    const m = loginPage.body.match(new RegExp(csrfRegex, 'i'))
-    if (m && m[1]) form.set(csrfField, m[1])
-  }
-
-  // Field tambahan statis (mis. login=1) lewat SIAKAD_EXTRA_FIELDS="a=1&b=2"
-  const extra = env('SIAKAD_EXTRA_FIELDS')
-  if (extra) {
-    new URLSearchParams(extra).forEach((v, k) => form.set(k, v))
-  }
-
-  // 3) POST login.
-  await fetchWithCookies(loginUrl, jar, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form.toString(),
+  const res = await fetch(url, {
+    headers: {
+      'Cookie': cookie,
+      'User-Agent': env('SIAKAD_USER_AGENT', 'Mozilla/5.0 (compatible; SiakadMonitor/1.0)'),
+      'Accept': 'text/html,application/xhtml+xml',
+    },
+    redirect: 'follow',
   })
+  const body = await res.text()
 
-  // 4) GET halaman perkuliahan dengan sesi yang sudah login.
-  const page = await fetchWithCookies(perkuliahanUrl, jar)
-  return page.body
+  // Deteksi sesi habis: ter-redirect ke EWAKo/login, atau halaman login muncul.
+  const onLoginPage = /Kode Keamanan|Single Sign On|EWAKo|name=["']?password/i.test(body)
+  const redirectedToSso = /ewako\.kallabs\.ac\.id/i.test(res.url) && !/siakad/i.test(res.url)
+  if (!res.ok || onLoginPage || redirectedToSso) {
+    throw new SessionExpiredError('Sesi SIAKAD habis / tidak login (perlu perbarui SIAKAD_COOKIE)')
+  }
+
+  return body
 }
 
 // ---------------------------------------------------------------------------
-// Deteksi status open/close dari HTML
+// Parse tabel perkuliahan -> { kode: {status, name} }
 // ---------------------------------------------------------------------------
 
-export function detectStatus(html: string): SiakadStatus {
-  let text = html
+const CODE_RE = /[A-Z]{2}\d{6}/   // mis. KW022309, KU022205, KI022203
 
-  // Persempit ke bagian tertentu dulu jika SIAKAD_SECTION_REGEX diisi
-  // (mis. menangkap baris/blok khusus "perkuliahan").
-  const sectionRegex = env('SIAKAD_SECTION_REGEX')
-  if (sectionRegex) {
-    const m = html.match(new RegExp(sectionRegex, 'i'))
-    if (m) text = m[0]
+export function parsePerkuliahan(html: string): Record<string, { status: SiakadStatus; name: string }> {
+  const openKw = env('SIAKAD_OPEN_KEYWORDS', 'open,buka,dibuka,aktif')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const closeKw = env('SIAKAD_CLOSE_KEYWORDS', 'tutup,ditutup,closed,nonaktif')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+
+  const result: Record<string, { status: SiakadStatus; name: string }> = {}
+
+  // Pisah per baris tabel.
+  const rows = html.split(/<tr[\s>]/i)
+  for (const row of rows) {
+    const codeMatch = row.match(CODE_RE)
+    if (!codeMatch) continue
+    const code = codeMatch[0]
+
+    const text = row.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase()
+    const hasOpen = openKw.some(k => text.includes(k))
+    const hasClose = closeKw.some(k => text.includes(k))
+    if (hasOpen === hasClose) continue   // ambigu / tidak ada status -> lewati
+
+    // Nama matkul: ambil teks sel tepat setelah kode, sampai '[' (jumlah sks).
+    let name = ''
+    const nameMatch = row.match(new RegExp(`${code}\\s*</td>\\s*<td[^>]*>([^<\\[]+)`, 'i'))
+    if (nameMatch) name = nameMatch[1].trim()
+
+    result[code] = { status: hasOpen ? 'open' : 'closed', name }
   }
 
-  // Buang tag HTML -> teks polos, lowercase.
-  const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase()
-
-  const openKw = env('SIAKAD_OPEN_KEYWORDS', 'buka,dibuka,open,aktif')
-    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-  const closeKw = env('SIAKAD_CLOSE_KEYWORDS', 'tutup,ditutup,closed,nonaktif,tidak aktif')
-    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-
-  const hasOpen = openKw.some(k => plain.includes(k))
-  const hasClose = closeKw.some(k => plain.includes(k))
-
-  // Hanya yakin jika tepat satu kategori cocok; selain itu 'unknown'
-  // supaya tidak ada notifikasi palsu.
-  if (hasOpen && !hasClose) return 'open'
-  if (hasClose && !hasOpen) return 'closed'
-  return 'unknown'
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +140,7 @@ export function detectStatus(html: string): SiakadStatus {
 // ---------------------------------------------------------------------------
 
 function label(s: SiakadStatus): string {
-  return s === 'open' ? 'BUKA' : s === 'closed' ? 'TUTUP' : 'TIDAK DIKETAHUI'
+  return s === 'open' ? 'BUKA (Open)' : 'TUTUP'
 }
 
 function fmtTime(iso: string): string {
@@ -205,78 +151,109 @@ function fmtTime(iso: string): string {
   })
 }
 
+function courseLabel(code: string, name: string): string {
+  return name ? `${code} — ${name}` : code
+}
+
 export interface SiakadCheckResult {
   ok: boolean
-  status: SiakadStatus
-  changed: boolean
-  reminderSent: boolean
-  notified: boolean
+  totalCourses: number
+  changed: number
+  reminders: number
   reason?: string
 }
 
 export async function runSiakadCheck(): Promise<SiakadCheckResult> {
-  const now = new Date()
-  const prev = await readState()
+  const nowDate = new Date()
+  const now = nowDate.toISOString()
+  const state = await readState()
 
-  // Ambil status sekarang dari SIAKAD.
-  let status: SiakadStatus
+  // Ambil & parse halaman.
+  let current: Record<string, { status: SiakadStatus; name: string }>
   try {
     const html = await fetchPerkuliahanHtml()
-    status = detectStatus(html)
+    current = parsePerkuliahan(html)
   } catch (e: any) {
     const reason = e?.message || String(e)
-    await writeState({
-      status: prev?.status ?? 'unknown',
-      changedAt: prev?.changedAt ?? null,
-      reminderSent: prev?.reminderSent ?? true,
-      lastCheckedAt: now.toISOString(),
-      lastError: reason,
-    })
-    return { ok: false, status: prev?.status ?? 'unknown', changed: false, reminderSent: prev?.reminderSent ?? true, notified: false, reason }
+    // Sesi habis -> beri tahu sekali agar tidak spam.
+    if (e instanceof SessionExpiredError && !state.sessionExpiredNotified) {
+      await sendTelegram(
+        `🔒 <b>Sesi SIAKAD Habis</b>\n\n` +
+        `Monitor tidak bisa membaca halaman Perkuliahan.\n` +
+        `Silakan login ulang di browser lalu perbarui <code>SIAKAD_COOKIE</code>.\n\n` +
+        `Detail: ${reason}`
+      )
+      state.sessionExpiredNotified = true
+    }
+    state.lastCheckedAt = now
+    state.lastError = reason
+    await writeState(state)
+    return { ok: false, totalCourses: Object.keys(state.courses).length, changed: 0, reminders: 0, reason }
   }
 
-  // Status tidak jelas -> jangan picu notifikasi, cukup catat.
-  if (status === 'unknown') {
-    await writeState({
-      status: prev?.status ?? 'unknown',
-      changedAt: prev?.changedAt ?? null,
-      reminderSent: prev?.reminderSent ?? true,
-      lastCheckedAt: now.toISOString(),
-      lastError: 'Status tidak terdeteksi (cek SIAKAD_OPEN/CLOSE_KEYWORDS atau SIAKAD_SECTION_REGEX)',
-    })
-    return { ok: true, status: 'unknown', changed: false, reminderSent: prev?.reminderSent ?? true, notified: false, reason: 'unknown' }
+  // Sesi sehat lagi -> reset flag.
+  state.sessionExpiredNotified = false
+  state.lastError = null
+
+  const isFirstRun = Object.keys(state.courses).length === 0
+  const changes: string[] = []
+
+  for (const [code, { status, name }] of Object.entries(current)) {
+    const prev = state.courses[code]
+
+    if (!prev) {
+      // Matkul baru terlihat. Pada run pertama -> baseline diam.
+      // Jika muncul belakangan (matkul baru), anggap baseline juga (tanpa notif).
+      state.courses[code] = { status, name, changedAt: now, reminderSent: true }
+      continue
+    }
+
+    // Perbarui nama jika sekarang terdeteksi.
+    if (name && prev.name !== name) prev.name = name
+
+    if (status !== prev.status) {
+      changes.push(`• ${courseLabel(code, prev.name || name)}: ${label(prev.status)} ➜ ${label(status)}`)
+      prev.status = status
+      prev.changedAt = now
+      prev.reminderSent = false
+    }
   }
 
-  // Pertama kali jalan: tetapkan baseline tanpa notifikasi.
-  if (!prev || prev.status === 'unknown' || !prev.changedAt) {
-    await writeState({ status, changedAt: now.toISOString(), reminderSent: true, lastCheckedAt: now.toISOString(), lastError: null })
-    return { ok: true, status, changed: false, reminderSent: true, notified: false, reason: 'baseline' }
-  }
-
-  // Status BERUBAH -> notifikasi langsung.
-  if (status !== prev.status) {
+  // Kirim notifikasi perubahan (gabung jadi satu pesan).
+  if (!isFirstRun && changes.length > 0) {
     await sendTelegram(
       `⚠️ <b>Perubahan Status Perkuliahan</b>\n\n` +
-      `Status berubah: <b>${label(prev.status)}</b> ➜ <b>${label(status)}</b>\n` +
-      `🕒 ${fmtTime(now.toISOString())}`
+      changes.join('\n') +
+      `\n\n🕒 ${fmtTime(now)}`
     )
-    await writeState({ status, changedAt: now.toISOString(), reminderSent: false, lastCheckedAt: now.toISOString(), lastError: null })
-    return { ok: true, status, changed: true, reminderSent: false, notified: true }
   }
 
-  // Status SAMA -> cek apakah perlu kirim pengingat 5 menit (1x).
-  const elapsedMin = (now.getTime() - new Date(prev.changedAt).getTime()) / 60000
-  if (!prev.reminderSent && elapsedMin >= reminderMinutes()) {
+  // Kirim pengingat 5 menit (1x per perubahan) untuk matkul yang sudah lewat ambang.
+  const reminders: string[] = []
+  for (const [code, c] of Object.entries(state.courses)) {
+    if (c.reminderSent) continue
+    const elapsedMin = (nowDate.getTime() - new Date(c.changedAt).getTime()) / 60000
+    if (elapsedMin >= reminderMinutes()) {
+      reminders.push(`• ${courseLabel(code, c.name)}: ${label(c.status)} (sejak ${fmtTime(c.changedAt)})`)
+      c.reminderSent = true
+    }
+  }
+  if (reminders.length > 0) {
     await sendTelegram(
-      `⏰ <b>Pengingat</b>\n\n` +
-      `Status perkuliahan sudah <b>${label(status)}</b> sejak ${fmtTime(prev.changedAt)} ` +
-      `(lebih dari ${reminderMinutes()} menit).`
+      `⏰ <b>Pengingat (${reminderMinutes()} menit)</b>\n\n` +
+      `Status berikut sudah berubah lebih dari ${reminderMinutes()} menit lalu:\n` +
+      reminders.join('\n')
     )
-    await writeState({ ...prev, reminderSent: true, lastCheckedAt: now.toISOString(), lastError: null })
-    return { ok: true, status, changed: false, reminderSent: true, notified: true }
   }
 
-  // Tidak ada perubahan & belum waktunya/atau sudah dikirim.
-  await writeState({ ...prev, lastCheckedAt: now.toISOString(), lastError: null })
-  return { ok: true, status, changed: false, reminderSent: prev.reminderSent, notified: false }
+  state.lastCheckedAt = now
+  await writeState(state)
+
+  return {
+    ok: true,
+    totalCourses: Object.keys(current).length,
+    changed: changes.length,
+    reminders: reminders.length,
+    reason: isFirstRun ? 'baseline' : undefined,
+  }
 }
